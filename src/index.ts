@@ -1,6 +1,5 @@
 import { define } from "@opencode/plugin/effect/plugin"
-import { Duration, Effect, Schema, Scope } from "effect"
-import { HttpClient } from "effect/http"
+import { Duration, Effect, Schema } from "effect"
 import { resolveConfig, ToolInput } from "./config.js"
 import { PROVIDER_ID, PROVIDER_NAME, search } from "./searxng.js"
 
@@ -20,10 +19,9 @@ const TOOL_DESCRIPTION = [
   "Explicit `engines`/`categories`/`language` fields override plugin defaults for this call only.",
 ].join(" ")
 
-export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
+export const Plugin = define({
   id: "heretek-ai.websearch.searxng",
   effect: Effect.fn("SearxngPlugin")(function* (ctx) {
-    const http = yield* HttpClient.HttpClient
     let config: ReturnType<typeof resolveConfig>
     try {
       config = resolveConfig(ctx.options ?? {})
@@ -39,7 +37,7 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
         id: PROVIDER_ID,
         name: PROVIDER_NAME,
         execute: (input) =>
-          search(http, ctx.app, config, { query: input.query }).pipe(
+          search(ctx.app, config, { query: input.query }).pipe(
             Effect.timeoutOrElse({
               duration: Duration.millis(config.timeoutMs + 5_000),
               orElse: () => Effect.fail(new Error(`SearXNG request timed out after ${config.timeoutMs}ms`)),
@@ -62,10 +60,11 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
           // The host remaps `effect` and `@opencode/plugin` imports to its own
           // runtime copies, but nothing else — importing e.g. `@opencode/schema`
           // for Tool.Error breaks loading because production installs omit
-          // devDependencies. So this tool never fails; it reports errors as text.
+          // devDependencies. Likewise only Scope is provided, so the HttpClient
+          // service is unavailable and HTTP goes through global fetch.
+          // So this tool never fails; it reports errors as text.
           execute: (input) =>
             search(
-              http,
               ctx.app,
               config,
               {

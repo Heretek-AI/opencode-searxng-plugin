@@ -1,8 +1,7 @@
 import { Duration, Effect, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import type { ResolvedConfig } from "./config.js"
 
-export const VERSION = "0.1.2"
+export const VERSION = "0.1.3"
 export const PROVIDER_ID = "searxng"
 export const PROVIDER_NAME = "SearXNG"
 
@@ -105,42 +104,39 @@ export function hintForStatus(status: number): string {
 /**
  * Execute a SearXNG search and return opencode-shaped results.
  * Query string is forwarded verbatim so `!engine !category :lang` syntax keeps working per-query.
+ *
+ * Uses global fetch on purpose: external plugins run with only Scope provided,
+ * so the HttpClient service is unavailable (and effect/http would need it).
  */
 export const search = (
-  http: HttpClient.HttpClient,
   app: { readonly name: string; readonly version: string; readonly channel: string },
   config: ResolvedConfig,
   params: SearchParams,
   maxResults?: number,
-): Effect.Effect<readonly WebSearchResult[], unknown> =>
+): Effect.Effect<readonly WebSearchResult[], Error> =>
   Effect.gen(function* () {
     const url = buildSearchUrl(config.baseUrl, params, config)
     const limit = Math.min(20, Math.max(1, maxResults ?? config.maxResults))
-    const request = HttpClientRequest.get(url).pipe(
-      HttpClientRequest.acceptJson,
-      HttpClientRequest.setHeaders({
-        "User-Agent": userAgent(app),
-        Accept: "application/json",
-        ...(config.bearerToken ? { Authorization: `Bearer ${config.bearerToken}` } : {}),
+    const headers: Record<string, string> = {
+      "User-Agent": userAgent(app),
+      Accept: "application/json",
+      ...(config.bearerToken ? { Authorization: `Bearer ${config.bearerToken}` } : {}),
+    }
+    const json = yield* Effect.tryPromise({
+      try: (signal) =>
+        fetch(url, { headers, signal }).then(async (res) => {
+          if (!res.ok) throw new Error(hintForStatus(res.status))
+          return (await res.json()) as unknown
+        }),
+      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: Duration.millis(config.timeoutMs),
+        orElse: () => Effect.fail(new Error(`SearXNG request timed out after ${config.timeoutMs}ms`)),
       }),
     )
-    const response = yield* HttpClient.withScope(HttpClient.filterStatusOk(http))
-      .execute(request)
-      .pipe(
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(SearxngResponse)),
-        Effect.scoped,
-        Effect.timeoutOrElse({
-          duration: Duration.millis(config.timeoutMs),
-          orElse: () => Effect.fail(new Error(`SearXNG request timed out after ${config.timeoutMs}ms`)),
-        }),
-        Effect.mapError((cause) => {
-          const status =
-            typeof cause === "object" && cause !== null && "response" in cause
-              ? (cause as { response?: { status?: number } }).response?.status
-              : undefined
-          if (status !== undefined) return new Error(hintForStatus(status))
-          return cause
-        }),
-      )
+    const response = yield* Schema.decodeUnknownEffect(SearxngResponse)(json).pipe(
+      Effect.mapError(() => new Error("Unexpected SearXNG response shape (expected { results: [...] })")),
+    )
     return mapResults(response.results, limit)
   })
