@@ -2,3 +2,6 @@ dist/
 node_modules/
 *.tsbuildinfo
 .npm/
+
+# SearXNG reference copy (has its own git history, never shipped)
+review/
