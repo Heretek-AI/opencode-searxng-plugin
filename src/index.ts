@@ -1,5 +1,4 @@
 import { define } from "@opencode/plugin/effect/plugin"
-import { Tool } from "@opencode/schema/tool"
 import { Duration, Effect, Schema, Scope } from "effect"
 import { HttpClient } from "effect/http"
 import { resolveConfig, ToolInput } from "./config.js"
@@ -59,47 +58,52 @@ export const Plugin = define<HttpClient.HttpClient | Scope.Scope>({
           description: TOOL_DESCRIPTION,
           input: ToolInput,
           output: ToolOutput,
+          // Note: failures are returned as content (never channel) on purpose.
+          // The host remaps `effect` and `@opencode/plugin` imports to its own
+          // runtime copies, but nothing else — importing e.g. `@opencode/schema`
+          // for Tool.Error breaks loading because production installs omit
+          // devDependencies. So this tool never fails; it reports errors as text.
           execute: (input) =>
-            Effect.gen(function* () {
-              const results = yield* search(
-                http,
-                ctx.app,
-                config,
-                {
-                  query: input.query,
-                  categories: input.categories,
-                  engines: input.engines,
-                  language: input.language,
-                  time_range: input.time_range,
-                  safesearch: input.safesearch,
-                  pageno: input.pageno ?? 1,
-                },
-                input.maxResults ?? config.maxResults,
-              )
-              const output = {
-                results: results.map((item) => ({
-                  url: item.url,
-                  ...(item.title ? { title: item.title } : {}),
-                  ...(item.content ? { content: item.content } : {}),
-                })),
-              }
-              const content =
-                output.results.length === 0
-                  ? "No search results found. Please try a different query."
-                  : output.results
-                      .map((item) => {
-                        const title = item.title ?? item.url
-                        return `## [${title}](${item.url})${item.content ? `\n\n${item.content}` : ""}`
-                      })
-                      .join("\n\n")
-              return { output, content, metadata: { provider: PROVIDER_ID } }
-            }).pipe(
-              Effect.mapError(
-                (error) =>
-                  new Tool.Error({
-                    message: `Unable to search SearXNG for ${input.query}`,
-                    error,
-                  }),
+            search(
+              http,
+              ctx.app,
+              config,
+              {
+                query: input.query,
+                categories: input.categories,
+                engines: input.engines,
+                language: input.language,
+                time_range: input.time_range,
+                safesearch: input.safesearch,
+                pageno: input.pageno ?? 1,
+              },
+              input.maxResults ?? config.maxResults,
+            ).pipe(
+              Effect.map((results) => {
+                const output = {
+                  results: results.map((item) => ({
+                    url: item.url,
+                    ...(item.title ? { title: item.title } : {}),
+                    ...(item.content ? { content: item.content } : {}),
+                  })),
+                }
+                const content =
+                  output.results.length === 0
+                    ? "No search results found. Please try a different query."
+                    : output.results
+                        .map((item) => {
+                          const title = item.title ?? item.url
+                          return `## [${title}](${item.url})${item.content ? `\n\n${item.content}` : ""}`
+                        })
+                        .join("\n\n")
+                return { output, content, metadata: { provider: PROVIDER_ID } }
+              }),
+              Effect.catch((cause: unknown) =>
+                Effect.succeed({
+                  output: { results: [] },
+                  content: `SearXNG search failed for ${input.query}: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  metadata: { provider: PROVIDER_ID, error: true },
+                }),
               ),
             ),
         }),

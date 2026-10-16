@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@heretek-ai/opencode-searxng",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SearXNG web search provider + searxng tool for opencode v2 (self-hosted, no API key)",
   "type": "module",
   "license": "MIT",
@@ -51,7 +51,6 @@
   },
   "devDependencies": {
     "@opencode/plugin": "^2.0.30",
-    "@opencode/schema": "^2.0.30",
     "@types/node": "^22.7.0",
     "effect": "4.0.1",
     "typescript": "^5.6.3"
