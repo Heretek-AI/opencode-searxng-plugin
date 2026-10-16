@@ -1,7 +1,7 @@
 import { Duration, Effect, Schema } from "effect"
 import type { ResolvedConfig } from "./config.js"
 
-export const VERSION = "0.1.3"
+export const VERSION = "0.1.4"
 export const PROVIDER_ID = "searxng"
 export const PROVIDER_NAME = "SearXNG"
 
@@ -19,6 +19,9 @@ export type SearxngItem = typeof SearxngItem.Type
 export const SearxngResponse = Schema.Struct({
   query: Schema.String.pipe(Schema.optional),
   results: Schema.Array(SearxngItem),
+  // Entries look like ["github", "Suspended: access denied"]; shape varies by
+  // SearXNG version, so decode tolerantly and extract names defensively below.
+  unresponsive_engines: Schema.Array(Schema.Unknown).pipe(Schema.optional),
 })
 export type SearxngResponse = typeof SearxngResponse.Type
 
@@ -70,6 +73,27 @@ export function mapResults(items: readonly SearxngItem[], maxResults: number): r
   return out
 }
 
+/** Names of suspended/failing engines from `unresponsive_engines` (deduped, order-stable). */
+export function unresponsiveEngines(response: SearxngResponse): readonly string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const entry of response.unresponsive_engines ?? []) {
+    const name =
+      typeof entry === "string"
+        ? entry
+        : Array.isArray(entry) && typeof entry[0] === "string"
+          ? entry[0]
+          : typeof entry === "object" && entry !== null && "engine" in entry && typeof entry.engine === "string"
+            ? entry.engine
+            : undefined
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names
+}
+
 export function buildSearchUrl(baseUrl: string, params: SearchParams, defaults: ResolvedConfig): string {
   const url = new URL(`${baseUrl.replace(/\/+$/, "")}/search`)
   url.searchParams.set("q", params.query)
@@ -101,6 +125,11 @@ export function hintForStatus(status: number): string {
   return `SearXNG request failed (HTTP ${status})`
 }
 
+export interface SearchOutput {
+  readonly results: readonly WebSearchResult[]
+  readonly unresponsive: readonly string[]
+}
+
 /**
  * Execute a SearXNG search and return opencode-shaped results.
  * Query string is forwarded verbatim so `!engine !category :lang` syntax keeps working per-query.
@@ -113,7 +142,7 @@ export const search = (
   config: ResolvedConfig,
   params: SearchParams,
   maxResults?: number,
-): Effect.Effect<readonly WebSearchResult[], Error> =>
+): Effect.Effect<SearchOutput, Error> =>
   Effect.gen(function* () {
     const url = buildSearchUrl(config.baseUrl, params, config)
     const limit = Math.min(20, Math.max(1, maxResults ?? config.maxResults))
@@ -138,5 +167,8 @@ export const search = (
     const response = yield* Schema.decodeUnknownEffect(SearxngResponse)(json).pipe(
       Effect.mapError(() => new Error("Unexpected SearXNG response shape (expected { results: [...] })")),
     )
-    return mapResults(response.results, limit)
+    return {
+      results: mapResults(response.results, limit),
+      unresponsive: unresponsiveEngines(response),
+    }
   })

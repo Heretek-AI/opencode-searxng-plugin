@@ -38,6 +38,7 @@ export const Plugin = define({
         name: PROVIDER_NAME,
         execute: (input) =>
           search(ctx.app, config, { query: input.query }).pipe(
+            Effect.map(({ results }) => results),
             Effect.timeoutOrElse({
               duration: Duration.millis(config.timeoutMs + 5_000),
               orElse: () => Effect.fail(new Error(`SearXNG request timed out after ${config.timeoutMs}ms`)),
@@ -78,7 +79,7 @@ export const Plugin = define({
               },
               input.maxResults ?? config.maxResults,
             ).pipe(
-              Effect.map((results) => {
+              Effect.map(({ results, unresponsive }) => {
                 const output = {
                   results: results.map((item) => ({
                     url: item.url,
@@ -86,7 +87,7 @@ export const Plugin = define({
                     ...(item.content ? { content: item.content } : {}),
                   })),
                 }
-                const content =
+                const body =
                   output.results.length === 0
                     ? "No search results found. Please try a different query."
                     : output.results
@@ -95,6 +96,10 @@ export const Plugin = define({
                           return `## [${title}](${item.url})${item.content ? `\n\n${item.content}` : ""}`
                         })
                         .join("\n\n")
+                const content =
+                  unresponsive.length === 0
+                    ? body
+                    : `${body}\n\nNote: ${unresponsive.join(", ")} ${unresponsive.length === 1 ? "engine is" : "engines are"} suspended or unresponsive — results may be partial.`
                 return { output, content, metadata: { provider: PROVIDER_ID } }
               }),
               Effect.catch((cause: unknown) =>
