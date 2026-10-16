@@ -2,7 +2,7 @@ import { Duration, Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 import type { ResolvedConfig } from "./config.js"
 
-export const VERSION = "0.1.0"
+export const VERSION = "0.1.1"
 export const PROVIDER_ID = "searxng"
 export const PROVIDER_NAME = "SearXNG"
 
