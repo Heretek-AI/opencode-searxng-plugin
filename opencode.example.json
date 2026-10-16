@@ -1,0 +1,19 @@
+{
+  "plugins": [
+    {
+      "package": "@heretek-ai/opencode-searxng",
+      "options": {
+        "baseUrl": "http://localhost:8888",
+        "categories": "general",
+        "engines": "",
+        "language": "all",
+        "safesearch": 1,
+        "maxResults": 8,
+        "timeoutMs": 25000
+      }
+    }
+  ],
+  "websearch": {
+    "provider": "searxng"
+  }
+}
